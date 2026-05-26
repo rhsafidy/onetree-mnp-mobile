@@ -1,9 +1,9 @@
-import '../../models/touriste.dart';
+import '../../models/tourist.dart';
 
-abstract class ITouristeRepository {
-  Future<Touriste> creer(Touriste touriste);
-  Future<Touriste?> getById(String id);
-  Future<List<Touriste>> rechercher(String query);
-  Future<Touriste> mettreAJour(Touriste touriste);
-  Future<void> supprimer(String id);
+abstract class ITouristRepository {
+  Future<Tourist> create(Tourist tourist);
+  Future<Tourist?> getById(String id);
+  Future<List<Tourist>> search(String query);
+  Future<Tourist> update(Tourist tourist);
+  Future<void> delete(String id);
 }
