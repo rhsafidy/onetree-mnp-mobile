@@ -73,7 +73,6 @@ class TouristRepository implements ITouristRepository {
     );
   }
 
-  @override 
   Future<List<Tourist>> getAll() async {
     final rows = await _db.query(
       DbConstants.tableTourists,
