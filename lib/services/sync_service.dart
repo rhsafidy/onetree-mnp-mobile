@@ -1,7 +1,4 @@
 // lib/services/sync_service.dart
-//
-// Handles deferred synchronisation (3h max constraint from Mantadia terrain).
-// Listens for network reconnection and flushes the sync_queue automatically.
 
 import 'dart:convert';
 import 'dart:io';
@@ -13,19 +10,52 @@ import '../models/sync_queue_entry.dart';
 import '../repositories/sync_queue_repository.dart';
 import '../repositories/tree_repository.dart';
 import '../repositories/photo_repository.dart';
+import 'package:mobile_app/services/device_service.dart';
+import 'package:mobile_app/services/session_service.dart';
 
 class SyncService {
-  SyncService._();
+  SyncService._() {
+    _dio = Dio(BaseOptions(
+      baseUrl:        AppConstants.apiBaseUrl,
+      connectTimeout: AppConstants.apiTimeout,
+      receiveTimeout: AppConstants.apiTimeout,
+    ));
+
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final path = options.path;
+
+        if (path.startsWith('/sync') || path.startsWith('/photos')) {
+          // Routes terrain → device token
+          final headers = await DeviceService.instance.getSyncHeaders();
+          options.headers.addAll(headers);
+        } else {
+          // Autres routes → JWT classique
+          final token = await DeviceService.instance.getDeviceToken();
+            if (token != null) {
+              options.headers['x-device-token'] = token;
+              options.headers['Content-Type']   = 'application/json';
+            } else {
+              final jwt = SessionService.instance.token;
+              if (jwt != null) options.headers['Authorization'] = 'Bearer $jwt';
+            }
+            handler.next(options); // ← toujours appelé
+        }
+        handler.next(options);
+      },
+    ));
+  }
+
   static final SyncService instance = SyncService._();
 
   final _syncQueueRepo = SyncQueueRepository();
   final _treeRepo      = TreeRepository();
   final _photoRepo     = PhotoRepository();
-  final _dio           = Dio(BaseOptions(
-    baseUrl:        AppConstants.apiBaseUrl,
-    connectTimeout: AppConstants.apiTimeout,
-    receiveTimeout: AppConstants.apiTimeout,
-  ));
+  late Dio _dio;
+
+  // CORRECTIF : exposé en getter public pour que pullFromServer() puisse
+  // réutiliser la même instance (baseUrl + intercepteur device token).
+  Dio get dio => _dio;
 
   bool _isSyncing = false;
 
@@ -39,7 +69,7 @@ class SyncService {
     });
   }
 
-  // ── Public: manual trigger (call from SyncScreen) ─────────────────────────
+  // ── Public: manual trigger ────────────────────────────────────────────────
 
   Future<SyncResult> syncAll() async {
     if (_isSyncing) return SyncResult(synced: 0, failed: 0, skipped: 0);
@@ -76,7 +106,7 @@ class SyncService {
 
   Future<int> getPendingCount() => _syncQueueRepo.getPendingCount();
 
-  // ── Private: route each entry by action type ──────────────────────────────
+  // ── Private ───────────────────────────────────────────────────────────────
 
   Future<void> _processEntry(SyncQueueEntry entry) async {
     switch (entry.typeAction) {
@@ -100,10 +130,14 @@ class SyncService {
   Future<void> _handleCreate(SyncQueueEntry entry) async {
     final payload = jsonDecode(entry.payloadJson) as Map<String, dynamic>;
     await _dio.post(
-      '/${entry.tableTarget}',
-      data: payload,
+      '/sync/push',
+      data: {
+        'action':    SyncActions.create,
+        'table':     entry.tableTarget,
+        'entity_id': entry.entityId,
+        'payload':   payload,
+      },
     );
-    // Mark local record as synced
     if (entry.tableTarget == DbConstants.tableTrees) {
       await _treeRepo.markSynced(entry.entityId);
     }
@@ -111,9 +145,14 @@ class SyncService {
 
   Future<void> _handleUpdate(SyncQueueEntry entry) async {
     final payload = jsonDecode(entry.payloadJson) as Map<String, dynamic>;
-    await _dio.put(
-      '/${entry.tableTarget}/${entry.entityId}',
-      data: payload,
+    await _dio.post(
+      '/sync/push',
+      data: {
+        'action':    SyncActions.update,
+        'table':     entry.tableTarget,
+        'entity_id': entry.entityId,
+        'payload':   payload,
+      },
     );
     if (entry.tableTarget == DbConstants.tableTrees) {
       await _treeRepo.markSynced(entry.entityId);
@@ -135,20 +174,31 @@ class SyncService {
     final formData = FormData.fromMap({
       'tree_id': treeId,
       'type':    type,
-      'file':    await MultipartFile.fromFile(path, filename: file.uri.pathSegments.last),
+      'file':    await MultipartFile.fromFile(
+                   path,
+                   filename: file.uri.pathSegments.last,
+                 ),
     });
 
-    final response = await _dio.post('/photos', data: formData);
+    final response  = await _dio.post('/photos', data: formData);
     final remoteUrl = response.data['url'] as String;
     await _photoRepo.markUploaded(photoId, remoteUrl);
   }
 
   Future<void> _handleDelete(SyncQueueEntry entry) async {
-    await _dio.delete('/${entry.tableTarget}/${entry.entityId}');
+    await _dio.post(
+      '/sync/push',
+      data: {
+        'action':    SyncActions.delete,
+        'table':     entry.tableTarget,
+        'entity_id': entry.entityId,
+        'payload':   <String, dynamic>{},
+      },
+    );
   }
 }
 
-// ── Result DTO ────────────────────────────────────────────────────────────────
+// ── SyncResult ────────────────────────────────────────────────────────────────
 
 class SyncResult {
   final int synced;

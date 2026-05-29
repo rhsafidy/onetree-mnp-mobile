@@ -2,13 +2,13 @@
 
 abstract class AppConstants {
   // ── API ──────────────────────────────────────────────────────────────────
-  static const String apiBaseUrl = 'https://api.mnp-touriste-arbre.mg/v1';
+  static const String apiBaseUrl = 'http://192.168.0.50:3000/api/v1';
   static const Duration apiTimeout = Duration(seconds: 30);
 
   // ── Sync ─────────────────────────────────────────────────────────────────
   /// Maximum delay (in hours) before an agent must sync after planting
   static const int syncMaxDelayHours = 3;
-  static const int syncMaxRetries = 5;
+  static const int syncMaxRetries = 5; 
   static const Duration syncRetryInterval = Duration(minutes: 15);
 
   // ── Photos ───────────────────────────────────────────────────────────────
